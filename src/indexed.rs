@@ -104,6 +104,25 @@ impl BlobInfo {
             }
         }
     }
+
+    /// Compute if the range of way IDs of this blob (min and max ID value) is included in the
+    /// given set of IDs with at least one ID inside of this range.
+    fn way_range_included(&self, way_ids: &BTreeSet<i64>) -> RangeIncluded {
+        match self.id_ranges.as_ref() {
+            None => RangeIncluded::Unknown,
+            Some(IdRanges { way_ids: None, .. }) => RangeIncluded::No,
+            Some(IdRanges {
+                way_ids: Some(range),
+                ..
+            }) => {
+                if range_included(range.clone(), way_ids) {
+                    RangeIncluded::Yes(range.clone())
+                } else {
+                    RangeIncluded::No
+                }
+            }
+        }
+    }
 }
 
 /// Allows filtering elements and iterating over their dependencies.
@@ -390,6 +409,36 @@ impl<R: Read + Seek + Send> IndexedReader<R> {
         }
 
         Ok(())
+    }
+
+    pub fn get_way_blocks_by_id(
+        &mut self,
+        way_ids: &BTreeSet<i64>,
+    ) -> Result<Vec<(std::ops::RangeInclusive<i64>, PrimitiveBlock)>> {
+        self.create_index()?;
+
+        let mut r = Vec::new();
+
+        for info in &mut self.index {
+            // Skip header blobs and blobs where there are certainly no ways available.
+            if info.blob_type != SimpleBlobType::Primitive {
+                continue;
+            }
+
+            let range = match info.way_range_included(way_ids) {
+                RangeIncluded::Yes(range) => range,
+                RangeIncluded::No | RangeIncluded::Unknown => continue,
+            };
+
+            r.push((
+                range,
+                self.reader
+                    .blob_from_offset(info.offset)?
+                    .to_primitiveblock()?,
+            ))
+        }
+
+        Ok(r)
     }
 }
 
