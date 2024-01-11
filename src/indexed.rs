@@ -411,7 +411,7 @@ impl<R: Read + Seek + Send> IndexedReader<R> {
         Ok(())
     }
 
-    pub fn get_way_blocks_by_id(
+    pub fn get_ways_blocks_by_id(
         &mut self,
         way_ids: &BTreeSet<i64>,
     ) -> Result<Vec<(std::ops::RangeInclusive<i64>, PrimitiveBlock)>> {
@@ -425,17 +425,51 @@ impl<R: Read + Seek + Send> IndexedReader<R> {
                 continue;
             }
 
+            let block = self
+                .reader
+                .blob_from_offset(info.offset)?
+                .to_primitiveblock()?;
+
+            Self::update_element_id_ranges(info, &block);
+
             let range = match info.way_range_included(way_ids) {
                 RangeIncluded::Yes(range) => range,
                 RangeIncluded::No | RangeIncluded::Unknown => continue,
             };
 
-            r.push((
-                range,
-                self.reader
-                    .blob_from_offset(info.offset)?
-                    .to_primitiveblock()?,
-            ))
+            r.push((range, block))
+        }
+
+        Ok(r)
+    }
+
+    pub fn get_nodes_blocks_by_id(
+        &mut self,
+        node_ids: &BTreeSet<i64>,
+    ) -> Result<Vec<(std::ops::RangeInclusive<i64>, PrimitiveBlock)>> {
+        self.create_index()?;
+
+        let mut r = Vec::new();
+
+        for info in &mut self.index {
+            // Skip header blobs and blobs where there are certainly no ways available.
+            if info.blob_type != SimpleBlobType::Primitive {
+                continue;
+            }
+
+            let block = self
+                .reader
+                .blob_from_offset(info.offset)?
+                .to_primitiveblock()?;
+
+            Self::update_element_id_ranges(info, &block);
+
+            let range = match info.node_range_included(node_ids) {
+                RangeIncluded::Yes(range) => range,
+                RangeIncluded::No | RangeIncluded::Unknown => continue,
+            };
+
+            r.push((range, block))
         }
 
         Ok(r)
